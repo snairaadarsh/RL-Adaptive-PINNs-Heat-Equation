@@ -110,7 +110,7 @@ Future Work
 
 Status
 ------
-Paper under final preprartion
+Paper under review at 4th International Conference on Integrated Circuits and Communication Systems
 
 ----
 The complete manuscript, experimental code, trained models, and result visualizations will be made publicly available upon publication.
