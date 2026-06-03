@@ -5,7 +5,7 @@ This repository presents a Reinforcement Learning (RL) based adaptive sampling f
 An Upper Confidence Bound (UCB) multi-armed bandit algorithm is integrated into the PINN training process to adaptively guide collocation point selection by focusing on regions with higher residual errors.
 
 Code will be released after manuscript publication.
-Manuscript is currently under preparation.
+Manuscript accepted at the **2026 4th International Conference on Integrated Circuits and Communication Systems (ICICACS)**.
 
 
 Problem Overview
@@ -17,7 +17,13 @@ This work proposes an RL-based adaptive sampling strategy to overcome this limit
 
 Governing Equation
 ------------------
-The one-dimensional heat equation is used as the benchmark problem for this study.
+The one-dimensional heat equation is used as the benchmark problem:
+
+```
+∂u(x,t)/∂t = α ∂²u(x,t)/∂x²
+```
+
+with `x ∈ [0, 1]`, `t ≥ 0`, initial condition `u(x, 0) = sin(πx)`, and boundary conditions `u(0, t) = u(1, t) = 0`.
 
 The objective is to approximate the solution using a neural network trained with a physics-informed loss that enforces the governing PDE along with initial and boundary conditions.
 
@@ -34,70 +40,111 @@ Both approaches use the same network architecture, number of epochs, and hyperpa
 
 PINN Architecture
 -----------------
-- Fully connected feedforward neural network
-- Inputs: spatial and temporal coordinates (x, t)
-- Output: temperature field u(x, t)
-- Loss function components:
-  - PDE residual loss
-  - Initial condition loss
-  - Boundary condition loss
+The best-performing network configuration identified through architecture search:
+
+- **Layers (L):** 3
+- **Width (W):** 50 neurons per layer
+- **Activation function:** GELU
+- **Inputs:** spatial and temporal coordinates (x, t)
+- **Output:** temperature field u(x, t)
+
+Loss function components:
+- **PDE Residual Loss:** enforces the heat equation via automatic differentiation
+- **Initial Condition Loss:** enforces `u(x, 0) = sin(πx)`
+- **Boundary Condition Loss:** enforces `u(0, t) = u(1, t) = 0`
+
+Architecture search results (final L2 error):
+
+| Architecture   | L | W   | Activation | Final L2 Error |
+|----------------|---|-----|------------|----------------|
+| L3_W50_gelu    | 3 | 50  | GELU       | **0.019244**   |
+| L4_W20_tanh    | 4 | 20  | tanh       | 0.025709       |
+| L4_W50_tanh    | 4 | 50  | tanh       | 0.027705       |
+| L5_W50_tanh    | 5 | 50  | tanh       | 0.044664       |
+| L3_W100_tanh   | 3 | 100 | tanh       | 0.045242       |
+| L3_W20_tanh    | 3 | 20  | tanh       | 0.068563       |
+| L1_W50_tanh    | 1 | 50  | tanh       | 0.674835       |
+| L3_W50_relu    | 3 | 50  | ReLU       | 3.554516       |
 
 
 Reinforcement Learning Based Adaptive Sampling
 ----------------------------------------------
 Reinforcement learning is used to guide the selection of collocation points during training.
 
-- State: current distribution of PDE residual errors
-- Action: selection of spatial regions for sampling new collocation points
-- Reward: reduction in residual error after training on selected points
+- **State (S):** vector of segment-wise mean PDE residuals across the domain
+- **Action (A):** selection of spatial segments for sampling new collocation points
+- **Reward (R):** log-transformed residual reduction after training on selected points — `r_i = log(1 + R̄_i)`
 
-The Upper Confidence Bound (UCB) algorithm balances exploration and exploitation by prioritizing regions with higher error while still ensuring domain coverage.
+The domain `[0, 1] × [0, T]` is partitioned into **N = 8** equal segments, each acting as an independent arm in the multi-armed bandit framework. The UCB score for each segment is computed as:
+
+```
+UCB_i = r̄_i + c * sqrt(ln(N_total) / n_i)
+```
+
+where `r̄_i` is the average reward, `n_i` is the number of times segment `i` was selected, `N_total` is the total selections so far, and `c` is the exploration constant.
+
+
+UCB Parameter Sensitivity
+--------------------------
+An ablation study was performed over four values of the exploration constant `c`:
+
+| UCB Constant (c) | Final L2 Error | Training Time (s) |
+|------------------|----------------|-------------------|
+| 0.5              | 0.012640       | 26.16             |
+| 1.0              | 0.012057       | 26.87             |
+| **2.0**          | **0.007348**   | 28.18             |
+| 4.0              | 0.009624       | 28.03             |
+
+**c = 2** was selected for all reported experiments, yielding the lowest final L2 error of 0.007348.
 
 
 Training Setup
 --------------
 Both models are trained under identical conditions:
 
-- Number of epochs: 3000
-- Training time: approximately 70.5 seconds
-- Same network architecture and optimizer settings
+- **Epochs:** 3000
+- **Optimizer:** Adam
+- **Same network architecture** for fair comparison
 
 The UCB algorithm is invoked at each iteration to select new collocation points based on residual feedback.
 
 
 Evaluation Metrics
 ------------------
-The performance of uniform and RL-adaptive PINNs is evaluated using:
+Performance is compared using:
 
-- L2 error
-- Final loss value
-- Average PDE residual
-- Training time
-- Convergence behavior
+- **L2 Error** — accuracy against the analytical solution
+- **Final Loss** — how well physics constraints are satisfied
+- **Average PDE Residual** — error distribution across the domain
+- **Training Time** — computational cost
+- **Convergence Behavior** — how quickly the model reaches threshold accuracy
+
+Residual heatmaps, sampling distribution, and UCB arm selection trends are used to analyze training behavior.
 
 
 Results Summary
 ---------------
-Uniform Sampling:
-- Final L2 error: 0.033735
-- Training time: 70.54 seconds
-- Final loss: 0.000884
-- Average residual: 0.014815
+Comparative analysis across four independent runs:
 
-UCB-Adaptive Sampling:
-- Final L2 error: 0.024194
-- Training time: 70.48 seconds
-- Final loss: 0.000434
-- Average residual: 0.010954
+| Run | Method       | Final L2 Error | Training Time (s) | Final Loss | Avg Residual | L2 Improvement |
+|-----|--------------|----------------|-------------------|------------|--------------|----------------|
+| 1   | Uniform      | 0.029202       | 24.45             | 0.000358   | 0.006614     | 60.15%         |
+|     | UCB-Adaptive | 0.011638       | 24.38             | 0.000059   | 0.004046     |                |
+| 2   | Uniform      | 0.024237       | 27.01             | 0.000141   | 0.005840     | 57.02%         |
+|     | UCB-Adaptive | 0.010418       | 26.60             | 0.000028   | 0.002090     |                |
+| 3   | Uniform      | 0.020102       | 26.88             | 0.000134   | 0.005724     | 53.18%         |
+|     | UCB-Adaptive | 0.009411       | 26.35             | 0.000046   | 0.002988     |                |
+| 4   | Uniform      | 0.023157       | 24.56             | 0.000152   | 0.004757     | 62.80%         |
+|     | UCB-Adaptive | 0.008615       | 26.75             | 0.000052   | 0.003758     |                |
 
-The UCB-based adaptive PINN achieves a 28.28 percent reduction in L2 error compared to uniform sampling while maintaining similar training time and convergence epochs.
+The UCB-based adaptive PINN achieves **53.18% to 62.80% reduction in L2 error** across all runs compared to uniform sampling, while maintaining comparable training times.
 
 
 Conclusion
 ----------
 This work demonstrates that integrating reinforcement learning with Physics-Informed Neural Networks through a UCB-based adaptive sampling strategy significantly improves solution accuracy without increasing computational cost.
 
-By focusing training on regions with higher residual errors, the RL-enhanced PINN achieves better convergence and more efficient use of collocation points.
+By treating collocation point selection as a multi-armed bandit problem, the framework dynamically prioritizes high-residual regions based on PDE residual feedback. The ablation study confirmed c = 2 as the optimal exploration constant, and architecture experiments validated the chosen network configuration (L=3, W=50, GELU).
 
 
 Future Work
@@ -108,6 +155,15 @@ Future Work
 - Adaptive sampling for multi-physics PINNs
 
 
+Authors
+-------
+- Aadarsh S Nair — Department of Mathematics, Amrita Vishwa Vidyapeetham, Coimbatore
+- Subburaj — Department of Mathematics, Amrita Vishwa Vidyapeetham, Coimbatore
+- Saran P P — Department of Mathematics, Amrita Vishwa Vidyapeetham, Coimbatore
+- Rishab P Nambiar — Department of Mathematics, Amrita Vishwa Vidyapeetham, Coimbatore
+- Abishek S — Department of Mathematics, Amrita Vishwa Vidyapeetham, Coimbatore
+
+
 Status
 ------
-Paper under review at 4th International Conference on Integrated Circuits and Communication Systems
+Paper accepted at the **2026 4th International Conference on Integrated Circuits and Communication Systems (ICICACS)**.
